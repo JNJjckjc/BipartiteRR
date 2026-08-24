@@ -12,7 +12,7 @@ def _save_rank_data(tag, distribution, N, goal, x, results, ratio_or_eps, fixed_
     fixed_val: 当 tag='epsilon' 时为 ratio 值, tag='ratios' 时为 epsilon 值
     """
     os.makedirs(DATA_DIR, exist_ok=True)
-    fname = os.path.join(DATA_DIR, f'rank_ems_{tag}_{distribution}_N{N}_{goal}_{fixed_val}.json')
+    fname = os.path.join(DATA_DIR, f'rank_ems2_{tag}_{distribution}_N{N}_{goal}_{fixed_val}.json')
     save_dict = {
         'x': list(x),
         'N': N,
@@ -195,21 +195,16 @@ def attack_reports(perturb_freq, N, epsilon, mechanism,
     return real_reports + fake_reports
 
 
-def frequency_attack_gain(before, after, target):
-    return after[target - 1] - before[target - 1]
-
-
-def ranking_attack_gain(before, after, target):
-    rb = np.where(np.argsort(-before) == target - 1)[0][0] + 1
-    ra = np.where(np.argsort(-after) == target - 1)[0][0] + 1
-    return rb - ra
-
-
 # ==================== 排名折线图 ====================
 
 def compute_rank(freq, target):
     """返回 target 在 freq 中的降序排名（1 = 最高，N = 最低）"""
     return int(np.where(np.argsort(-freq) == target - 1)[0][0] + 1)
+
+
+def compute_avg_rank(freq, targets):
+    """返回多个目标在 freq 中降序排名的平均值"""
+    return float(np.mean([compute_rank(freq, t) for t in targets]))
 
 
 def _plot_figure(x, x_label, results, attack, distribution, N, ratio_or_eps, tag, out_dir, goal):
@@ -247,7 +242,7 @@ def _plot_figure(x, x_label, results, attack, distribution, N, ratio_or_eps, tag
 
     ax.set_xlabel(x_label, fontsize=22, fontweight='bold')
     ax.set_ylabel('Rank', fontsize=22, fontweight='bold')
-    ax.set_title(f'EMS {attack} {goal}  ({distribution}, N={N}, {ratio_or_eps})',
+    ax.set_title(f'{attack} {goal}  ({distribution}, N={N}, {ratio_or_eps})',
                  fontsize=20)
     ax.tick_params(axis='both', labelsize=17)
     ax.grid(True, alpha=0.3)
@@ -255,7 +250,7 @@ def _plot_figure(x, x_label, results, attack, distribution, N, ratio_or_eps, tag
     ax.legend(fontsize=11, loc='best', handlelength=4)
 
     fig.tight_layout()
-    fname = os.path.join(out_dir, f'rank_ems_vs_{tag}_{distribution}_N{N}_{attack}_{goal}.png')
+    fname = os.path.join(out_dir, f'rank_ems2_vs_{tag}_{distribution}_N{N}_{attack}_{goal}.png')
     os.makedirs(os.path.dirname(fname), exist_ok=True)
     fig.savefig(fname, dpi=150)
     plt.close(fig)
@@ -280,9 +275,10 @@ def plot_rank_vs_epsilon(
     freq = np.bincount(data, minlength=N + 1)[1:]
     nonzero = np.where(freq > 0)[0]
     if goal == 'Promotion':
-        target = int(nonzero[np.argmin(freq[nonzero])] + 1)
+        # 频率最低的两个值作为攻击目标
+        targets = nonzero[np.argsort(freq[nonzero])[:2]] + 1
     else:
-        target = int(np.argmax(freq) + 1)
+        targets = nonzero[np.argsort(freq[nonzero])[-2:]] + 1
 
     mechanisms = ['GRR', 'BRR']
     attacks = ['RIA', 'ROA']
@@ -298,17 +294,19 @@ def plot_rank_vs_epsilon(
                 perturb = grr_perturb if mechanism == 'GRR' else brr_perturb
                 base_reports = perturb(data, N, eps)
                 base_est = ems_recovery(base_reports, N, eps, mechanism)
-                pre_vals.append(compute_rank(base_est, target))
+                pre_vals.append(compute_avg_rank(base_est, targets))
 
                 post_ranks = []
                 for s in range(n_seeds):
                     np.random.seed(s)
+                    # 每次攻击从两个目标中均匀随机选择一个
+                    target = int(np.random.choice(targets))
                     attacked_reports = attack_reports(
                         base_reports, N, eps, mechanism,
                         attack, goal, target, ratio
                     )
                     attacked_est = ems_recovery(attacked_reports, N, eps, mechanism)
-                    post_ranks.append(compute_rank(attacked_est, target))
+                    post_ranks.append(compute_avg_rank(attacked_est, targets))
                 post_vals.append(np.mean(post_ranks))
 
             results[attack][pre_key] = pre_vals
@@ -340,9 +338,10 @@ def plot_rank_vs_ratios(
     freq = np.bincount(data, minlength=N + 1)[1:]
     nonzero = np.where(freq > 0)[0]
     if goal == 'Promotion':
-        target = int(nonzero[np.argmin(freq[nonzero])] + 1)
+        # 频率最低的两个值作为攻击目标
+        targets = nonzero[np.argsort(freq[nonzero])[:2]] + 1
     else:
-        target = int(np.argmax(freq) + 1)
+        targets = nonzero[np.argsort(freq[nonzero])[-2:]] + 1
 
     mechanisms = ['GRR', 'BRR']
     attacks = ['RIA', 'ROA']
@@ -357,18 +356,20 @@ def plot_rank_vs_ratios(
             perturb = grr_perturb if mechanism == 'GRR' else brr_perturb
             base_reports = perturb(data, N, epsilon)
             base_est = ems_recovery(base_reports, N, epsilon, mechanism)
-            pre_rank = compute_rank(base_est, target)
+            pre_rank = compute_avg_rank(base_est, targets)
 
             for r in ratios:
                 post_ranks = []
                 for s in range(n_seeds):
                     np.random.seed(s)
+                    # 每次攻击从两个目标中均匀随机选择一个
+                    target = int(np.random.choice(targets))
                     attacked_reports = attack_reports(
                         base_reports, N, epsilon, mechanism,
                         attack, goal, target, r
                     )
                     attacked_est = ems_recovery(attacked_reports, N, epsilon, mechanism)
-                    post_ranks.append(compute_rank(attacked_est, target))
+                    post_ranks.append(compute_avg_rank(attacked_est, targets))
                 pre_vals.append(pre_rank)
                 post_vals.append(np.mean(post_ranks))
 
@@ -392,7 +393,7 @@ if __name__ == "__main__":
     epsilon = 1.0
     ratios = [0.01, 0.03, 0.05, 0.07, 0.10, 0.15]
 
-    distributions = ['uniform', 'normal', 'exponential', 'zipf']
+    distributions = ['normal', 'exponential']
     for goal in ['Promotion']:
         for dist in distributions:
             print(f'\n===== {dist} | {goal} =====')
