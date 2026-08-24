@@ -4,6 +4,29 @@ import numpy as np
 import matplotlib.pyplot as plt
 import math
 
+DATA_DIR = r'./data_cache'
+
+
+def _save_rank_data(tag, distribution, N, goal, x, results, ratio_or_eps, fixed_val):
+    """保存排名数据以便后续快速重绘（JSON 格式，人可读）
+    fixed_val: 当 tag='epsilon' 时为 ratio 值, tag='ratios' 时为 epsilon 值
+    """
+    os.makedirs(DATA_DIR, exist_ok=True)
+    fname = os.path.join(DATA_DIR, f'rank_ems_{tag}_{distribution}_N{N}_{goal}_{fixed_val}.json')
+    save_dict = {
+        'x': list(x),
+        'N': N,
+        'ratio_or_eps': ratio_or_eps,
+        'distribution': distribution,
+        'goal': goal,
+        'tag': tag,
+    }
+    for atk in ['RIA', 'ROA']:
+        for k, v in results[atk].items():
+            save_dict[f'{atk}_{k}'] = list(v)
+    with open(fname, 'w', encoding='utf-8') as fp:
+        json.dump(save_dict, fp, indent=2, ensure_ascii=False)
+    print(f'数据已缓存: {fname}')
 
 
 def generate_data(distribution='zipf', n=5000, N=30, zipf_s=1.3):
@@ -182,6 +205,183 @@ def ranking_attack_gain(before, after, target):
     return rb - ra
 
 
+# ==================== 排名折线图 ====================
+
+def compute_rank(freq, target):
+    """返回 target 在 freq 中的降序排名（1 = 最高，N = 最低）"""
+    return int(np.where(np.argsort(-freq) == target - 1)[0][0] + 1)
+
+
+def _plot_figure(x, x_label, results, attack, distribution, N, ratio_or_eps, tag, out_dir, goal):
+    """通用绘图：单 Y 轴，pre 细空心 / post 实心 / ΔRank 虚线三角菱形实心"""
+    mech_style = {
+        'BRR': {'color': '#1f77b4', 'marker': 'o', 'label': 'BRR'},
+        'GRR': {'color': '#d62728', 'marker': 's', 'label': 'GRR'},
+    }
+    delta_marker = {'BRR': '^', 'GRR': 'D'}
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    z_offsets = {'BRR': 3, 'GRR': 0}
+    for mech, ms in mech_style.items():
+        pre_key = f'{mech}-pre'
+        post_key = f'{mech}-post'
+        delta = np.abs(np.array(results[pre_key]) - np.array(results[post_key]))
+        zo = z_offsets[mech]
+
+        ax.plot(x, results[post_key],
+                color=ms['color'], marker=ms['marker'], linestyle='-',
+                markersize=10, markerfacecolor=ms['color'], markeredgewidth=0,
+                linewidth=2, zorder=zo + 2,
+                label=f'{ms["label"]}_post-attack')
+        ax.plot(x, results[pre_key],
+                color=ms['color'], marker=ms['marker'], linestyle='-',
+                markersize=10, markerfacecolor='white', markeredgecolor=ms['color'],
+                markeredgewidth=1.0, linewidth=2, zorder=zo + 3,
+                label=f'{ms["label"]}_pre-attack')
+        ax.plot(x, delta,
+                color=ms['color'], marker=delta_marker[mech], linestyle='--',
+                markersize=10, markerfacecolor=ms['color'], markeredgewidth=0,
+                linewidth=2, zorder=zo + 4,
+                label=f'{ms["label"]}_ΔRank')
+
+    ax.set_xlabel(x_label, fontsize=22, fontweight='bold')
+    ax.set_ylabel('Rank', fontsize=22, fontweight='bold')
+    ax.set_title(f'EMS {attack} {goal}  ({distribution}, N={N}, {ratio_or_eps})',
+                 fontsize=20)
+    ax.tick_params(axis='both', labelsize=17)
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0, None)
+    ax.legend(fontsize=11, loc='best', handlelength=4)
+
+    fig.tight_layout()
+    fname = os.path.join(out_dir, f'rank_ems_vs_{tag}_{distribution}_N{N}_{attack}_{goal}.png')
+    os.makedirs(os.path.dirname(fname), exist_ok=True)
+    fig.savefig(fname, dpi=150)
+    plt.close(fig)
+    print(f'已保存: {fname}')
+
+
+def plot_rank_vs_epsilon(
+    N=60,
+    n_data=50000,
+    ratio=0.1,
+    epsilons=None,
+    n_seeds=10,
+    distribution='zipf',
+    goal='Promotion',
+    seed=0
+):
+    if epsilons is None:
+        epsilons = [1, 2, 3, 4, 5, 6]
+
+    np.random.seed(seed)
+    data = generate_data(distribution, n=n_data, N=N)
+    freq = np.bincount(data, minlength=N + 1)[1:]
+    nonzero = np.where(freq > 0)[0]
+    if goal == 'Promotion':
+        target = int(nonzero[np.argmin(freq[nonzero])] + 1)
+    else:
+        target = int(np.argmax(freq) + 1)
+
+    mechanisms = ['GRR', 'BRR']
+    attacks = ['RIA', 'ROA']
+    results = {atk: {} for atk in attacks}
+
+    for mechanism in mechanisms:
+        for attack in attacks:
+            pre_key = f'{mechanism}-pre'
+            post_key = f'{mechanism}-post'
+            pre_vals, post_vals = [], []
+
+            for eps in epsilons:
+                perturb = grr_perturb if mechanism == 'GRR' else brr_perturb
+                base_reports = perturb(data, N, eps)
+                base_est = ems_recovery(base_reports, N, eps, mechanism)
+                pre_vals.append(compute_rank(base_est, target))
+
+                post_ranks = []
+                for s in range(n_seeds):
+                    np.random.seed(s)
+                    attacked_reports = attack_reports(
+                        base_reports, N, eps, mechanism,
+                        attack, goal, target, ratio
+                    )
+                    attacked_est = ems_recovery(attacked_reports, N, eps, mechanism)
+                    post_ranks.append(compute_rank(attacked_est, target))
+                post_vals.append(np.mean(post_ranks))
+
+            results[attack][pre_key] = pre_vals
+            results[attack][post_key] = post_vals
+
+    out_dir = f'./result_ems/{distribution}'
+    _save_rank_data('epsilon', distribution, N, goal, epsilons, results,
+                    f'ratio={ratio}', f'ratio{ratio}')
+    for attack in attacks:
+        _plot_figure(epsilons, 'ε', results[attack], attack, distribution, N,
+                     f'ratio={ratio}', 'epsilon', out_dir, goal)
+
+
+def plot_rank_vs_ratios(
+    N=60,
+    n_data=50000,
+    epsilon=1.0,
+    ratios=None,
+    n_seeds=10,
+    distribution='zipf',
+    goal='Promotion',
+    seed=0
+):
+    if ratios is None:
+        ratios = [0.01, 0.03, 0.05, 0.07, 0.10, 0.15]
+
+    np.random.seed(seed)
+    data = generate_data(distribution, n=n_data, N=N)
+    freq = np.bincount(data, minlength=N + 1)[1:]
+    nonzero = np.where(freq > 0)[0]
+    if goal == 'Promotion':
+        target = int(nonzero[np.argmin(freq[nonzero])] + 1)
+    else:
+        target = int(np.argmax(freq) + 1)
+
+    mechanisms = ['GRR', 'BRR']
+    attacks = ['RIA', 'ROA']
+    results = {atk: {} for atk in attacks}
+
+    for mechanism in mechanisms:
+        for attack in attacks:
+            pre_key = f'{mechanism}-pre'
+            post_key = f'{mechanism}-post'
+            pre_vals, post_vals = [], []
+
+            perturb = grr_perturb if mechanism == 'GRR' else brr_perturb
+            base_reports = perturb(data, N, epsilon)
+            base_est = ems_recovery(base_reports, N, epsilon, mechanism)
+            pre_rank = compute_rank(base_est, target)
+
+            for r in ratios:
+                post_ranks = []
+                for s in range(n_seeds):
+                    np.random.seed(s)
+                    attacked_reports = attack_reports(
+                        base_reports, N, epsilon, mechanism,
+                        attack, goal, target, r
+                    )
+                    attacked_est = ems_recovery(attacked_reports, N, epsilon, mechanism)
+                    post_ranks.append(compute_rank(attacked_est, target))
+                pre_vals.append(pre_rank)
+                post_vals.append(np.mean(post_ranks))
+
+            results[attack][pre_key] = pre_vals
+            results[attack][post_key] = post_vals
+
+    out_dir = f'./result_ems/{distribution}'
+    _save_rank_data('ratios', distribution, N, goal, ratios, results,
+                    f'ε={epsilon}', f'eps{epsilon}')
+    for attack in attacks:
+        _plot_figure(ratios, 'Fake User Ratio', results[attack], attack, distribution, N,
+                     f'ε={epsilon}', 'ratios', out_dir, goal)
+
 if __name__ == "__main__":
     N = 60
     n_data = 50000
@@ -196,4 +396,6 @@ if __name__ == "__main__":
     for goal in ['Promotion']:
         for dist in distributions:
             print(f'\n===== {dist} | {goal} =====')
+            plot_rank_vs_epsilon(N, n_data, ratio, epsilons, n_seeds, dist, goal, seed)
+            plot_rank_vs_ratios(N, n_data, epsilon, ratios, n_seeds, dist, goal, seed)
     print('\n全部完成.')
