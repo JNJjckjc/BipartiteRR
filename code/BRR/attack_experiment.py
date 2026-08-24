@@ -196,6 +196,4 @@ if __name__ == "__main__":
     for goal in ['Promotion']:
         for dist in distributions:
             print(f'\n===== {dist} | {goal} =====')
-            plot_rank_vs_epsilon(N, n_data, ratio, epsilons, n_seeds, dist, goal, seed)
-            plot_rank_vs_ratios(N, n_data, epsilon, ratios, n_seeds, dist, goal, seed)
     print('\n全部完成.')
