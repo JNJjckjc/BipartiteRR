@@ -3,6 +3,7 @@
 
 > # Usage
 > The supplementary.pdf contains all theorem proofs and extended experiments.
+> 
 > The `code` folder contains four subfolders: BRR, DPBoost, L-SRR, Distribution Estimation, and SGDandDNN.
 >-   In the `BRR` folder, `LocalRS.py` implements Algorithm 1, which searches for a locally high-utility value of mm starting from a local perspective, and `BRR.py` implements the Bipartite Randomized Response mechanism.
 >-   The `DPBoost` folder contains code that applies DP mechanisms to decision trees. Experimental datasets are located in `DPBoost\data\regression`.
