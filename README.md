@@ -8,6 +8,6 @@
 > -   The `L-SRR` folder contains a reproduction of the L-SRR scheme proposed by Wang et al. `encode.py` is the encoding script, and running `partition.py` will generate the spatial partitioning results.
 > -   The `SGDandDNN` folder includes implementations of various DP mechanisms applied to Stochastic Gradient Descent (SGD) and Deep Neural Networks (DNN).
 > -   The `DistributionEstimation` folder contains the implementation of distribution estimation methods and the poisoning attack experiments. The code for the four distribution estimation methods is located in 'DistributionEstimation\methods'
-> The supplementary.pdf contains all theorem proofs and extended experiments.
+>The supplementary.pdf contains all theorem proofs and extended experiments.
 >#  Illustrate
 >Each folder can run independently. For input/output formats and parameter settings, see the comments in the individual scripts. Python 3.12 is recommended and make sure to install the necessary dependency libraries (such as NumPy, Scikit-learn, PyTorch, or TensorFlow, etc.).
